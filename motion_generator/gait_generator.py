@@ -58,12 +58,6 @@ parser.add_argument("--walk_max_dx_forward", type=float, default=None)
 parser.add_argument("--walk_max_dx_backward", type=float, default=None)
 parser.add_argument("-l", "--length", type=int, default=10)
 parser.add_argument("-m", "--meshcat_viz", action="store_true", default=False)
-parser.add_argument(
-    "--duck",
-    choices=["go_bdx", "open_duck_mini", "open_duck_mini_v2"],
-    help="Duck type",
-    required=True,
-)
 parser.add_argument("--debug", action="store_true", default=False)
 parser.add_argument("--preset", type=str, default="")
 parser.add_argument(
@@ -86,14 +80,6 @@ FPS = 50  # 50 for mujoco playground, 30 for AWD
 MESHCAT_FPS = 20
 DISPLAY_MESHCAT = args.meshcat_viz
 
-# For IsaacGymEnvs (OUTDATED)
-# [root position, root orientation, joint poses (e.g. rotations)]
-# [x, y, z, qw, qx, qy, qz, j1, j2, j3, j4, j5, j6, j7, j8, j9, j10, j11, j12, j13, j14]
-
-# For AWD and amp for hardware
-# [root position, root orientation, joint poses (e.g. rotations), target toe positions, linear velocity, angular velocity, joint velocities, target toe velocities]
-# [x, y, z, qw, qx, qy, qz, j1, j2, j3, j4, j5, j6, j7, j8, j9, j10, j11, j12, j13, j14, l_toe_x, l_toe_y, l_toe_z, r_toe_x, r_toe_y, r_toe_z, lin_vel_x, lin_vel_y, lin_vel_z, ang_vel_x, ang_vel_y, ang_vel_z, j1_vel, j2_vel, j3_vel, j4_vel, j5_vel, j6_vel, j7_vel, j8_vel, j9_vel, j10_vel, j11_vel, j12_vel, j13_vel, j14_vel, l_toe_vel_x, l_toe_vel_y, l_toe_vel_z, r_toe_vel_x, r_toe_vel_y, r_toe_vel_z]
-
 episode = {
     "LoopMode": "Wrap",
     "FPS": FPS,
@@ -114,9 +100,9 @@ if args.debug:
     episode["Debug_info"] = []
 
 script_path = os.path.dirname(os.path.abspath(__file__))
-robot = args.duck
+robot = "full_assembly_v2"
 robot_urdf = f"{robot}.urdf"
-asset_path = os.path.join(script_path, f"robots/{robot}")
+asset_path = os.path.join(script_path, f"{robot}")
 
 preset_filename = args.preset
 filename = os.path.join(asset_path, "placo_defaults.json")
@@ -161,10 +147,6 @@ avg_x_lin_vel = []
 avg_y_lin_vel = []
 avg_yaw_vel = []
 added_frame_info = False
-# center_y_pos = None
-# center_y_pos = -(pwe.parameters.feet_spacing / 2)
-# print(f"center_y_pos: {center_y_pos}")
-
 
 def compute_angular_velocity(quat, prev_quat, dt):
     # Convert quaternions to scipy Rotation objects
@@ -206,11 +188,7 @@ while True:
         else:
             T_world_fbase = pwe.robot.get_T_world_fbase()
         root_position = list(T_world_fbase[:3, 3])
-        # if center_y_pos is None:
-        #    center_y_pos = root_position[1]
 
-        # TODO decomment this line for big duck ?
-        # root_position[1] = root_position[1] - center_y_pos
         if round(root_position[2], 5) < 0:
             print(f"BAD root_position: {root_position[2]:.5f}")
         root_orientation_quat = list(R.from_matrix(T_world_fbase[:3, :3]).as_quat())
@@ -224,13 +202,6 @@ while True:
             joints_positions = list(pwe.get_angles().values())
             T_world_leftFoot = pwe.robot.get_T_world_left()
             T_world_rightFoot = pwe.robot.get_T_world_right()
-
-        # T_body_leftFoot = (
-        #     T_world_leftFoot  # np.linalg.inv(T_world_fbase) @ T_world_leftFoot
-        # )
-        # T_body_rightFoot = (
-        #     T_world_rightFoot  # np.linalg.inv(T_world_fbase) @ T_world_rightFoot
-        # )
 
         T_body_leftFoot = np.linalg.inv(T_world_fbase) @ T_world_leftFoot
         T_body_rightFoot = np.linalg.inv(T_world_fbase) @ T_world_rightFoot
@@ -255,24 +226,13 @@ while True:
         avg_y_lin_vel.append(world_linear_vel[1])
         body_rot_mat = T_world_fbase[:3, :3]
         body_linear_vel = list(body_rot_mat.T @ world_linear_vel)
-        # print("world linear vel", world_linear_vel)
-        # print("body linear vel", body_linear_vel)
 
         world_angular_vel = compute_angular_velocity(
             root_orientation_quat, prev_root_orientation_quat, (1 / FPS)
         )
 
-        # world_angular_vel = list(
-        #     (
-        #         R.from_quat(root_orientation_quat).as_euler("xyz")
-        #         - prev_root_orientation_euler
-        #     )
-        #     / (1 / FPS)
-        # )
         avg_yaw_vel.append(world_angular_vel[2])
         body_angular_vel = list(body_rot_mat.T @ world_angular_vel)
-        # print("world angular vel", world_angular_vel)
-        # print("body angular vel", body_angular_vel)
 
         if prev_joints_positions == None:
             prev_joints_positions = [0] * len(joints_positions)
@@ -392,14 +352,11 @@ while True:
         robot_frame_viz(pwe.robot, "left_foot")
         robot_frame_viz(pwe.robot, "right_foot")
 
-    # if pwe.t - start > args.length:
-    #    break
     if len(episode["Frames"]) == args.length * FPS:
         break
 
     i += 1
 
-# skip first 2 seconds to get better average speed
 mean_avg_x_lin_vel = np.around(np.mean(avg_x_lin_vel[240:]), 4)
 mean_avg_y_lin_vel = np.around(np.mean(avg_y_lin_vel[240:]), 4)
 mean_yaw_vel = np.around(np.mean(avg_yaw_vel[240:]), 4)
@@ -453,8 +410,7 @@ print(f"computed yvel: {y_vel}, mean yvel: {mean_avg_y_lin_vel}")
 print(f"computed thetavel: {theta_vel}, mean thetavel: {mean_yaw_vel}")
 
 
-name = f"{args.name}_{x_vel}_{y_vel}_{theta_vel}" # Do we need the id in the name ?
-# name = f"{x_vel}_{y_vel}_{theta_vel}"
+name = f"{args.name}_{x_vel}_{y_vel}_{theta_vel}" 
 file_name = name + str(".json")
 file_path = os.path.join(args.output_dir, file_name)
 os.makedirs(args.output_dir, exist_ok=True)

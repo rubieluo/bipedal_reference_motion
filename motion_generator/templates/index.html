@@ -68,15 +68,6 @@
 <body onload="loadParameters(); initValues()">
     <h1>Placo Gait Generator</h1>
 
-    <!-- Robot Selector Dropdown -->
-    <div class="robot-selector">
-        <label for="robot-select">Select Robot:</label>
-        <select id="robot-select" name="robot" onchange="changeRobot()">
-            <option value="go_bdx" {{ 'selected' if parameters.robot == 'go_bdx' else '' }}>Go-BDX</option>
-            <option value="mini_bdx" {{ 'selected' if parameters.robot == 'mini_bdx' else '' }}>Mini-BDX</option>
-        </select>
-    </div>
-
     <form id="gait-form" method="POST">
         <!-- Your existing form content -->
         <!-- Left and right columns with sliders -->
@@ -419,31 +410,6 @@
                 }
             })
             .catch(error => console.error('Error fetching parameters:', error));
-        }
-
-        // New function to handle robot selection
-        function changeRobot() {
-            const robotSelect = document.getElementById('robot-select');
-            const selectedRobot = robotSelect.value;
-
-            // Send the selected robot to the server
-            fetch('/change_robot', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ 'robot': selectedRobot })
-            })
-            .then(response => {
-                if (response.ok) {
-                    console.log("Robot changed to " + selectedRobot);
-                    triggerDefaults()
-                    // Optionally, you can reset the form or perform other actions
-                } else {
-                    console.error("Failed to change robot.");
-                }
-            })
-            .catch(error => console.error("Error:", error));
         }
 
         function loadParameters() {

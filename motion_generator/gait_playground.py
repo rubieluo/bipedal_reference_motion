@@ -41,12 +41,6 @@ parser.add_argument("--walk_max_dy", type=float, default=None)
 parser.add_argument("--walk_max_dx_forward", type=float, default=None)
 parser.add_argument("--walk_max_dx_backward", type=float, default=None)
 parser.add_argument("-l", "--length", type=int, default=10)
-parser.add_argument(
-    "--duck",
-    choices=["go_bdx", "open_duck_mini", "open_duck_mini_v2"],
-    help="Duck type",
-    required=True,
-)
 parser.add_argument("--preset", type=str, help="Path to the preset file")
 args = parser.parse_args()
 
@@ -56,14 +50,21 @@ FPS = 60
 MESHCAT_FPS = 60
 DT = 0.001
 
+TARGET_JOINT_ORDER = [
+    "joint1_pelvis_L",
+    "joint2_hip_L",  
+    "joint3_thigh_L",
+    "joint4_ankle_L",
+    "joint5_foot_L", 
+    "joint6_pelvis_R",
+    "joint7_hip_R",   
+    "joint8_thigh_R", 
+    "joint9_ankle_R", 
+    "joint10_foot_R"
+]
+
 episode = {
-    "LoopMode": "Wrap",
-    "FrameDuration": np.around(1 / FPS, 4),
-    "EnableCycleOffsetPosition": True,
-    "EnableCycleOffsetRotation": False,
-    "Debug_info": [],
     "Frames": [],
-    "MotionWeight": 1,
 }
 
 def open_browser():
@@ -80,18 +81,10 @@ script_path = os.path.dirname(os.path.abspath(__file__))
 # Define the parameters class to hold the variables
 class GaitParameters:
     def __init__(self):
-        if args.duck == "open_duck_mini":
-            self.robot = 'open_duck_mini'
-            self.robot_urdf = "open_duck_mini.urdf"
-            self.asset_path = os.path.join(script_path, "../open_duck_reference_motion_generator/robots/open_duck_mini/")
-        elif args.duck == "open_duck_mini_v2":
-            self.robot = 'open_duck_mini_v2'
-            self.robot_urdf = "open_duck_mini_v2.urdf"
-            self.asset_path = os.path.join(script_path, "../open_duck_reference_motion_generator/robots/open_duck_mini_v2/")
-        elif args.duck == "go_bdx":
-            self.robot = 'go_bdx'
-            self.robot_urdf = "go_bdx.urdf"
-            self.asset_path = os.path.join(script_path, "../open_duck_reference_motion_generator/robots/go_bdx/")
+        self.robot = 'full_assembly_v2'
+        self.robot_urdf = "full_assembly_v2.urdf"
+        self.asset_path = os.path.join(script_path, "../motion_generator/full_assembly_v2/")
+
         self.dx = 0.1
         self.dy = 0.0
         self.dtheta = 0.0
@@ -259,7 +252,6 @@ dorun = False
 doreset = False
 doupdate = False
 gait_condition = threading.Condition()
-# gait_start_semaphore = threading.Semaphore(0)
 
 @app.route('/log', methods=['POST'])
 def log_message():
@@ -288,7 +280,6 @@ def defaults():
 
 @app.route('/get', methods=['GET'])
 def get_parameters():
-    # Convert gait parameters to a dictionary
     parameters = gait.__dict__
     return jsonify(parameters)
 
@@ -307,27 +298,6 @@ def set_playback_speed():
         DT = 0.001
         return "Speed changed successfully", 200
     return "Invalid speed selection", 400
-
-@app.route('/change_robot', methods=['POST'])
-def change_robot():
-    global run_loop
-    global doreset
-    global dorun
-    data = request.get_json()
-    selected_robot = data.get('robot')
-    print(f"selected_robot: {selected_robot}")
-    if selected_robot in ['go_bdx', 'open_duck_mini']:
-        if selected_robot != gait.robot:
-            gait.robot = selected_robot
-            # Reset the gait generator to use the new robot
-            with gait_condition:
-                run_loop = False
-                doreset = True
-                dorun = False
-                gait_condition.notify()
-        return "Robot changed successfully", 200
-    else:
-        return "Invalid robot selection", 400
 
 @app.route('/run', methods=['POST'])
 def run():
@@ -452,6 +422,9 @@ def gait_generator_thread():
                 doreset = False
                 continue
             run_loop = True
+            episode["FPS"] = FPS 
+            episode["Joint_Names"] = TARGET_JOINT_ORDER
+            episode["Frames"] = [] # Clear the old data
         gait.reset(pwe)
         pwe.set_traj(gait.dx, gait.dy, gait.dtheta + 0.001)
         start = pwe.t
@@ -468,35 +441,27 @@ def gait_generator_thread():
         while run_loop:
             pwe.tick(DT)
             if pwe.t <= 0:
-                # print("waiting ")
                 start = pwe.t
                 last_record = pwe.t + 1 / FPS
                 last_meshcat_display = pwe.t + 1 / MESHCAT_FPS
                 continue
 
-            # print(np.around(pwe.robot.get_T_world_fbase()[:3, 3], 3))
-
             if pwe.t - last_record >= 1 / FPS:
-                # before
-                # T_world_fbase = pwe.robot.get_T_world_fbase()
-                # after
                 T_world_fbase = pwe.robot.get_T_world_trunk()
-                # fv.pushFrame(T_world_fbase, "trunk")
                 root_position = list(T_world_fbase[:3, 3])
                 root_orientation_quat = list(R.from_matrix(T_world_fbase[:3, :3]).as_quat())
-                joints_positions = list(pwe.get_angles().values())
+                joints_positions = []
+                
+                for name in TARGET_JOINT_ORDER:
+                    joint_idx = pwe.robot.get_joint_offset(name)
+                    angle = pwe.robot.state.q[joint_idx]
+                    joints_positions.append(angle)
 
                 T_world_leftFoot = pwe.robot.get_T_world_left()
                 T_world_rightFoot = pwe.robot.get_T_world_right()
 
-                # fv.pushFrame(T_world_leftFoot, "left")
-                # fv.pushFrame(T_world_rightFoot, "right")
-
                 T_body_leftFoot = np.linalg.inv(T_world_fbase) @ T_world_leftFoot
                 T_body_rightFoot = np.linalg.inv(T_world_fbase) @ T_world_rightFoot
-
-                # left_foot_pose = pwe.robot.get_T_world_left()
-                # right_foot_pose = pwe.robot.get_T_world_right()
 
                 left_toe_pos = list(T_body_leftFoot[:3, 3])
                 right_toe_pos = list(T_body_rightFoot[:3, 3])
@@ -506,8 +471,6 @@ def gait_generator_thread():
                 )
                 body_rot_mat = T_world_fbase[:3, :3]
                 body_linear_vel = list(body_rot_mat.T @ world_linear_vel)
-                # print("world linear vel", world_linear_vel)
-                # print("body linear vel", body_linear_vel)
 
                 world_angular_vel = list(
                     (
@@ -516,9 +479,6 @@ def gait_generator_thread():
                     )
                     / (1 / FPS)
                 )
-                body_angular_vel = list(body_rot_mat.T @ world_angular_vel)
-                # print("world angular vel", world_angular_vel)
-                # print("body angular vel", body_angular_vel)
 
                 if prev_joints_positions == None:
                     prev_joints_positions = [0] * len(joints_positions)
@@ -554,12 +514,6 @@ def gait_generator_thread():
                         episode["Frames"].append(
                             root_position + root_orientation_quat + joints_positions
                         )
-                    episode["Debug_info"].append(
-                        {
-                            "left_foot_pose": list(T_world_leftFoot.flatten()),
-                            "right_foot_pose": list(T_world_rightFoot.flatten()),
-                        }
-                    )
 
                 prev_root_position = root_position.copy()
                 prev_root_orientation_euler = (
@@ -571,7 +525,6 @@ def gait_generator_thread():
                 prev_initialized = True
 
                 last_record = pwe.t
-                # print("saved frame")
 
             if pwe.t - last_meshcat_display >= 1 / MESHCAT_FPS:
                 last_meshcat_display = pwe.t
@@ -581,19 +534,16 @@ def gait_generator_thread():
                 robot_frame_viz(pwe.robot, "left_foot")
                 robot_frame_viz(pwe.robot, "right_foot")
 
-            if pwe.t - start > gait.duration:
-                break
-
             i += 1
         run_loop = False
-        # print("recorded", len(episode["Frames"]), "frames")
-        # args_name = "dummy"
-        # file_name = args_name + str(".txt")
-        # file_path = os.path.join(args.output_dir, file_name)
-        # os.makedirs(args.output_dir, exist_ok=True)
-        # print("DONE, saving", file_name)
-        # with open(file_path, "w") as f:
-        #     json.dump(episode, f)
+        print("recorded", len(episode["Frames"]), "frames")
+        args_name = "dummy"
+        file_name = args_name + str(".txt")
+        file_path = os.path.join(args.output_dir, file_name)
+        os.makedirs(args.output_dir, exist_ok=True)
+        print("DONE, saving", file_name)
+        with open(file_path, "w") as f:
+            json.dump(episode, f)
 
 def open_browser():
     try:

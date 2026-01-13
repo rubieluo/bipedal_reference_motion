@@ -16,21 +16,14 @@ class PlacoWalkEngine:
     def __init__(
         self,
         asset_path: str = "",
-        model_filename: str = "go_bdx.urdf",
+        model_filename: str = "full_assembly_v2.urdf",
         init_params: dict = {},
         ignore_feet_contact: bool = False,
-        knee_limits: list = None,
     ) -> None:
         model_filename = os.path.join(asset_path, model_filename)
         self.asset_path = asset_path
         self.model_filename = model_filename
         self.ignore_feet_contact = ignore_feet_contact
-
-        robot_type = asset_path.split("/")[-1]
-        if robot_type in ["open_duck_mini", "go_bdx"]:
-            knee_limits = knee_limits or [-0.2, -0.01]
-        else:
-            knee_limits = knee_limits or [0.2, 0.01]
 
         # Loading the robot
         self.robot = placo.HumanoidRobot(model_filename)
@@ -38,9 +31,6 @@ class PlacoWalkEngine:
         self.parameters = placo.HumanoidParameters()
         if init_params is not None:
             self.load_parameters(init_params)
-        else:
-            defaults_filename = os.path.join(asset_path, "placo_defaults.json")
-            self.load_defaults(defaults_filename)
 
         # Creating the kinematics solver
         self.solver = placo.KinematicsSolver(self.robot)
@@ -48,9 +38,6 @@ class PlacoWalkEngine:
         self.robot.set_velocity_limits(12.0)
         self.solver.enable_joint_limits(False)
         self.solver.dt = DT / REFINE
-
-        self.robot.set_joint_limits("left_knee", *knee_limits)
-        self.robot.set_joint_limits("right_knee", *knee_limits)
 
         # Creating the walk QP tasks
         self.tasks = placo.WalkTasks()
@@ -60,16 +47,10 @@ class PlacoWalkEngine:
         self.tasks.initialize_tasks(self.solver, self.robot)
         self.tasks.left_foot_task.orientation().mask.set_axises("yz", "local")
         self.tasks.right_foot_task.orientation().mask.set_axises("yz", "local")
-        # tasks.trunk_orientation_task.configure("trunk_orientation", "soft", 1e-4)
-        # tasks.left_foot_task.orientation().configure("left_foot_orientation", "soft", 1e-6)
-        # tasks.right_foot_task.orientation().configure("right_foot_orientation", "soft", 1e-6)
 
-        # # Creating a joint task to assign DoF values for upper body
+        # Creating a joint task to assign DoF values for upper body
         self.joints = self.parameters.joints
-        joint_degrees = self.parameters.joint_angles
-        joint_radians = {joint: np.deg2rad(degrees) for joint, degrees in joint_degrees.items()}
         self.joints_task = self.solver.add_joints_task()
-        self.joints_task.set_joints(joint_radians)
         self.joints_task.configure("joints", "soft", 1.0)
 
         # Placing the robot in the initial position
@@ -83,7 +64,6 @@ class PlacoWalkEngine:
         print("Initial position reached")
 
         print(self.get_angles())
-        # exit()
 
         # Creating the FootstepsPlanner
         self.repetitive_footsteps_planner = placo.FootstepsPlannerRepetitive(
@@ -116,11 +96,9 @@ class PlacoWalkEngine:
         self.time_since_last_left_contact = 0.0
         self.start = None
         self.initial_delay = -1.0
-        # self.initial_delay = 0
         self.t = self.initial_delay
         self.last_replan = 0
 
-        # TODO remove startend_double_support_duration() when starting and ending ?
         self.period = (
             2 * self.parameters.single_support_duration
             + 2 * self.parameters.double_support_duration()
@@ -282,6 +260,3 @@ class PlacoWalkEngine:
         self.time_since_last_left_contact += dt
         self.time_since_last_right_contact += dt
         self.t += dt
-
-        # while time.time() < self.start_t + self.t:
-        #     time.sleep(1e-3)
