@@ -1,5 +1,7 @@
 BASED ON OPEN DUCK REFERENCE MOTION GENERATOR https://github.com/apirrone/Open_Duck_reference_motion_generator
 
+![walk](https://github.com/rubieluo/bipedal_reference_motion/blob/main/simmed_walk.gif)
+
 # Reference Motion Generator
 
 Reference motion generator based on [Placo](https://github.com/Rhoban/placo).
